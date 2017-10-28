@@ -1,0 +1,163 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "Nginx Instance",
+	"Mappings": {
+		"Environments": {
+			"dev": {
+				"SecurityGroupsEast": [
+					"sg-04a19460",
+					"sg-977a78ef"
+				],
+				"SubnetsEast": [
+					"subnet-79430720"
+				],
+				"AZsEast": [
+					"us-east-1a"
+				],
+				"IamInstanceProfile": "Dev-IAM-Profile",
+				"environmentparameter": "dev",
+				"ChefServer": "dev",
+				"NginxEnv": "nginx_env"
+			}
+		}
+	},
+	"Parameters": {
+		"EnvironmentValue": {
+			"AllowedValues": [
+				"dev"
+			],
+			"Default": "dev",
+			"Description": "What is the environment?",
+			"Type": "String"
+		},
+		"AMIID": {
+			"Description": "Provide the Value for AMI",
+			"Type": "AWS::EC2::Image::Id"
+		},
+		"InstanceType": {
+			"Description": "Provide the Instance Type. Ex: m4.large/m4.xlarge",
+			"Type": "String"
+		},
+		"AppInstanceName": {
+			"Description": "InstanceIdentifier for tagging on Console",
+			"Type": "String",
+			"Default": "Nginx Web Server"
+		}
+	},
+	"Resources": {
+		"LaunchConfig": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
+			"Properties": {
+				"BlockDeviceMappings": [{
+					"DeviceName": "/dev/sdk",
+					"Ebs": {
+						"DeleteOnTermination": false,
+						"Encrypted": true,
+						"Iops": "100",
+						"VolumeSize": "300",
+						"VolumeType": "io1"
+					}
+				}],
+				"SecurityGroups": {
+					"Fn::FindInMap": ["Environments", {
+						"Ref": "EnvironmentValue"
+					}, "SecurityGroupsEast"]
+				}
+			},
+			"IamInstanceProfile": {
+				"Fn::FindInMap": ["Environments", {
+					"Ref": "EnvironmentValue"
+				}, "IamInstanceProfile"]
+			},
+			"ImageId": {
+				"Ref": "AMIID"
+			},
+			"InstanceType": {
+				"Ref": "InstanceType"
+			},
+			"UserData": {
+				"Fn::Base64": {
+					"Fn::Join": [
+						"", [
+							"#!/bin/bash -v \n",
+							"yum update -y \n",
+							"yum install java-1.8.0-openjdk-devel.x86_64 -y \n",
+							"yum install wget -y \n",
+							" ",
+							"wget https://packages.chef.io/files/stable/chef-server/12.17.5/el/7/chef-server-core-12.17.5-1.el7.x86_64.rpm \n",
+							"sudo rpm -Uvh chef-server-core-12.17.5-1.el7.x86_64.rpm \n",
+							"chef-server-ctl reconfigure \n",
+							"curl https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chefdk -c stable -v 2.0.28 \n",
+							"bash /opt/prebuild_depot/chef-bootstrap-linux.sh aws-east \n",
+							" aws role[nginx] ",
+							{
+								"Fn::FindInMap": ["Environments", {
+									"Ref": "EnvironmentValue"
+								}, "nginx_env"]
+							}
+						]
+					]
+				}
+
+
+			}
+		},
+		"AutoScaleGroup": {
+			"UpdatePolicy": {
+				"AutoScalingScheduledAction": {
+					"IgnoreUnmodifiedGroupSizeProperties": "true"
+				},
+				"AutoScalingRollingUpdate": {
+					"MinInstancesInService": "1",
+					"MaxBatchSize": "2",
+					"PauseTime": "PT2M",
+					"WaitOnResourceSignals": "true"
+				}
+			},
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+				"AvailabilityZones": {
+					"Fn::FindInMap": ["Environments", {
+						"Ref": "EnvironmentValue"
+					}, "AZsEast"]
+				},
+				"LaunchConfigurationName": {
+					"Ref": "LaunchConfig"
+				},
+				"MaxSize": "1",
+				"MinSize": "1",
+				"VPCZoneIdentifier": {
+					"Fn::FindInMap": ["Environments", {
+						"Ref": "EnvironmentValue"
+					}, "SubnetsEast"]
+				}
+			}
+		},
+		"Outputs": {
+			"1": {
+				"Value": {
+					"Ref": "AMIID"
+				},
+				"Description": "AmiId"
+			},
+			"2": {
+				"Value": {
+					"Fn::FindInMap": [
+						"Environments",
+						{
+							"Ref": "EnvironmentValue"
+						},
+						"IamInstanceProfile"
+					]
+				},
+				"Description": "IamInstanceProfile"
+			},
+			"3": {
+				"Value": {
+					"Ref": "InstanceType"
+				},
+				"Description": "InstanceType"
+			}
+		}
+	}
+}
